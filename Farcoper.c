@@ -34,22 +34,9 @@
 
 #define BAUD 9600
 
-#define accelerometr_resolution_FS_1  72
-#define accelerometr_resolution_FS_0  18
 
 
-#define X_axis 0x29
-#define Y_axis 0x2B
-#define Z_axis 0x2D
-
-#define Chosen_axis 0x2D		// Мы работаем с этой осью в этой программе
-
-#define ChildTime 23
-//#define  MorningTime 7
 uint8_t MorningTime; 
-#define Allowed_number_of_attempts 2
-#define RinseCycle_NoActivity_sec 300
-#define Min_difference_by_washing 20		// разница в пять градаций. Может быть слишком много. Надо проверить.
 
 //---------------Переменные глобальные-------------------//
 
@@ -112,9 +99,9 @@ void Show_Morning_time(void);
 
 void Beeper_Activator(const uint8_t *pattern)
 {
-	//BeeperPattern_pointer=(uint8_t *)pattern;
-	//BeeperFlag|= 0x80;
-	//BeeperPatternCounter = 0;
+	BeeperPattern_pointer=(uint8_t *)pattern;
+	BeeperFlag|= 0x80;
+	BeeperPatternCounter = 0;
 }
 void Deal_with_Beeper(void)
 {
@@ -156,23 +143,16 @@ ISR(TIMER0_OVF_vect)		// 2ms  // Обслуживаем индикацию
 	 Digit++;												//изменение разряда для мультиплексированного вывода.
 	 if(Digit==4) Digit=0;
 	 
-	 if(((Mode_of_operation == ModeThresholdSET)||(Mode_of_operation == ModeTimeEdit)||(Mode_of_operation==ModeMorningTimeEdit))&&(G_counter_char>190)) PutOneDigit(10,Digit,0);				// 190 ms чёрный экран - моргание.
+	 if(10>1000) PutOneDigit(10,Digit,0);				// 190 ms чёрный экран - моргание. Не выполняется.
 	 else
 	 {
 															 //Показываем время (точка посередине) или тем-ру
-		 if ((Mode_of_operation == ModeOFF)||(Mode_of_operation == ModeTimeSuspend)||(Mode_of_operation==ModeTimeEdit)||(Mode_of_operation==ModeMorningTimeEdit))
-		  {
+		
 		 
-					if ((Last_GlobalVar)&&(Digit==2)&&(G_counter_char>127)) PutOneDigit(LED_string[Digit],Digit,1);
-					else  if ((!(Last_GlobalVar))&&(Digit==1))PutOneDigit(LED_string[Digit],Digit,1);
+					if ((Digit==2)&&(G_counter_char>127)) PutOneDigit(LED_string[Digit],Digit,1);
+					else  if (Digit==1)PutOneDigit(LED_string[Digit],Digit,1);
 					else PutOneDigit(LED_string[Digit],Digit,0);	  		 
-		  }
-		 
-		 else												//ускорение, точка после первого знака, и моргаем, если настрока.
-		  { 
-				  if (Digit==3) PutOneDigit(LED_string[Digit],Digit,1);
-				  else PutOneDigit(LED_string[Digit],Digit,0);  	  
-		  }
+	
 		}
  
 	  if(Mode_of_operation == ModeTimeSuspend)				//Попеременно светодиодами
@@ -258,8 +238,6 @@ ISR(TIMER2_OVF_vect)					//1ms // Логика датчика и задерже�
 							G_Flag_acceleration<<=1;									 // Сдвигаем влево в конце блока для следующей итерации
 
 
-						
-				
 				break;
 			
 				case ModeHWerror:
@@ -291,25 +269,21 @@ inline void SetupTimer_2 (void)
 
 
 
-
-
-
 void Get_time (void)
 {	
-		uint8_t var,hour,minute,second;
+    uint8_t var,hour,minute,second;
 
-		ds1307_getdate(&var, &var, &var, &hour, &minute, &second);
-		
-		LED_string[3]=(hour % 100 / 10);
-		LED_string[2]=(hour % 10);
-		LED_string[1]=(minute % 100 / 10);
-		LED_string[0]=(minute % 10);	
+    ds1307_getdate(&var, &var, &var, &hour, &minute, &second);
+    
+    LED_string[3]=(hour % 100 / 10);
+    LED_string[2]=(hour % 10);
+    LED_string[1]=(minute % 100 / 10);
+    LED_string[0]=(minute % 10);	
 }
 
 void Show_Morning_time (void)
 {
 
-	
 	LED_string[3]=(MorningTime % 100 / 10);
 	LED_string[2]=(MorningTime % 10);
 	LED_string[1]=0;
@@ -331,28 +305,6 @@ void Change_Mode_of_Operation(uint8_t NewMode)
 	
 //Сохраняем в энергонезависимой памяти.		 
 eeprom_update_byte(&EE_Mode_of_operation,Mode_of_operation);		 
-}
-
-
-void Check_Children_Time(void)
-{
-	uint8_t var,hour;
-	ds1307_getdate(&var, &var, &var, &hour, &var, &var);
-	if(((hour>= ChildTime)||(hour< MorningTime))&&(Mode_of_operation == ModeON))
-	{
-		RelayCut_OUT;
-		Change_Mode_of_Operation(ModeTimeSuspend);
-		Beeper_Activator(BeepPattern_SwitchOFF);
-	}
-
-	 if(hour>= ChildTime)TimeSuspendSkipEvening&=~0x01;	// Сбрасываем флаг пропуска вечера.
-	 if((hour>= MorningTime)&&(hour< ChildTime)&&(Mode_of_operation == ModeTimeSuspend))
-	 {
-			if (TimeSuspendSkipEvening&0x01)return;			//У нас вечер! 
-	 		Change_Mode_of_Operation(ModeON);
-	 		RelayCut_IN;
-			Beeper_Activator(BeepPattern_SwitchOn);
-	 }
 }
 
 
@@ -420,11 +372,41 @@ f=NULL;
 Buzzer_OFF;// зуммер выключился, загрузка окончена
 
 
-
 	while(1)
 	{
 		wdt_reset(); // сбрасываем собачий таймер
 
+		  switch(ButtonCheck())
+		  {
+			  case ButtonPressed_0_MASK:
+			  Beeper_Activator(BeepPattern);
+			  break;
+			  case ButtonPressed_1_MASK:
+			  Beeper_Activator(BeepPattern);
+			  break;
+			  case ButtonPressed_0_LONG_MASK:
+			  Beeper_Activator(BeepPattern_Meloidic);
+			  break;
+			  case ButtonPressed_1_LONG_MASK:
+			  Beeper_Activator(BeepPattern_Meloidic);
+			  break;
+			  case (ButtonPressed_0_LONG_MASK| ButtonPressed_1_LONG_MASK):
+			  
+			  break;
+			  case ButtonPressed_SHORT_Double_MASK:
+		
+			  break;
+
+		
+		  }
+
+        if(f)
+        {
+            cli();
+            f();	// вызов функции если там есть чё.
+            f=NULL;   // Предотвращаем цикличность.
+            sei();
+        }
 		 
 
 	
@@ -432,4 +414,3 @@ Buzzer_OFF;// зуммер выключился, загрузка окончен
 	
 	}
  }
-	 
