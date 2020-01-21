@@ -1,6 +1,6 @@
 
+#define F_CPU 80000000UL  // 8 MHz, внутренняя RC-цепочка
 #include <avr/io.h>
-
 
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
@@ -15,7 +15,7 @@
 #include "LED_shift.h"
 #include "HW_definitions.h"
 #include "Button_input.h"
-#include "One_wire.h"
+
 #include "avr/wdt.h"
 
 //------------- Умолчания----------------//
@@ -101,10 +101,9 @@ uint8_t TimeSuspendSkipEvening = 0x00;		// Без eeprom - не страшно �
 void (*f)(void) ;   // f - указатель
 
 //---------------Прототипы-------------------//
-void Acceleration_to_LED (signed char acceleration_output);
 void ReadAxis(void); // Прототип
 void Get_time (void);
-void ONE_WIRE_DO_IT_HERE(void);
+
 void Threshold_reducer (void);
 void Change_Mode_of_Operation(uint8_t NewMode);
 void Show_Morning_time(void);
@@ -113,9 +112,9 @@ void Show_Morning_time(void);
 
 void Beeper_Activator(const uint8_t *pattern)
 {
-	BeeperPattern_pointer=(uint8_t *)pattern;
-	BeeperFlag|= 0x80;
-	BeeperPatternCounter = 0;
+	//BeeperPattern_pointer=(uint8_t *)pattern;
+	//BeeperFlag|= 0x80;
+	//BeeperPatternCounter = 0;
 }
 void Deal_with_Beeper(void)
 {
@@ -195,47 +194,18 @@ ISR(TIMER0_OVF_vect)		// 2ms  // Обслуживаем индикацию
 ISR(TIMER2_OVF_vect)					//1ms // Логика датчика и задержек.
 {
 	
-	
-	G_time1++;
-	if(G_time1>1000)					// Секунда
-	{	
-		WashTimeWindow++;																		// время без сработок.Если давно их не было, даёт больше попыток - позволяет делать больше сработок.Чтобы не подряд.
-		G_time1 = 0;
-		//Логика восстановления питания после сработки и разрыва.
-		if (Overacceleration_Occured)
-		{
-			Overacceleration_Occured--;														   // будильник паузы (загружается при сработке)
-			if ((!(Overacceleration_Occured))&&(Mode_of_operation==ModeON))
-			{RelayCut_IN;  // Если уже нуль И	машину можно включать.
-			 Beeper_Activator(BeepPattern_SwitchOn);
-			}
-		}
-		
-	}
-	if ((WashTimeWindow>RinseCycle_NoActivity_sec )&&(Mode_of_operation == ModeON))				// только для режими "вкл"
-	{
-		
-		WashTimeWindow = 0;
-		if(NumberOfAttempts)NumberOfAttempts --; // Даём по ещё одной попытке на каждые RinseCycle_NoActivity_sec (5 минут или около).
-		
-		// Заодно затулим сюда автовыключение при бездействии!!!!
-		//Логика для автоотключения
-		if ((Maximum_acceleration-Minimum_acceleration)<Min_difference_by_washing)Change_Mode_of_Operation(ModeOFF); //вырубаемся!
-		Maximum_acceleration=0;		//Каждые Rinse_cycle_sec обнуляем переменные и начинаем прослушивание бездействия снова.
-		Minimum_acceleration=50;	// 0.9G. И в программе может уменьшаться.
-	}
+    G_time1++;
+    if(G_time1>1000)					// Секунда
+    {
 	
 	
-	
-	
-	
-	
-	
-// Таймер для зуммера	
-if(BeepDuration>0)BeepDuration--;
-if(BeepDuration ==0)Deal_with_Beeper();
+		// Таймер для зуммера	
+		if(BeepDuration>0)BeepDuration--;
+		if(BeepDuration ==0)Deal_with_Beeper();
 
-G_counter++;
+		G_counter++;
+
+	}
 
 
 	if (G_counter > 200) // каждые 200ms
@@ -263,7 +233,8 @@ G_counter++;
 				if (Nested_counter >40)
 				{
 					Nested_counter =0;
-					f = ONE_WIRE_DO_IT_HERE;			// начало таймслота для 1-wire
+					
+
 				}
 				else if (Nested_counter >13)
 				{
@@ -282,13 +253,11 @@ G_counter++;
 					if (G_Flag_acceleration>0x10)									//  секунда без прерывания по FF_WU_2
 						{
 							G_Flag_acceleration=0xFF;								 //  будем снижать, пока прерывание не сработает снова.
-							f = Threshold_reducer;
+							
 						}
 							G_Flag_acceleration<<=1;									 // Сдвигаем влево в конце блока для следующей итерации
 
 
-						if (Mode_of_operation==ModeThresholdSET)Acceleration_to_LED(RAM_AlarmThreshold);
-						else Acceleration_to_LED(current_Max_acceleration);
 						
 				
 				break;
@@ -316,210 +285,13 @@ inline void SetupTimer_2 (void)
 {			//переполнение каждые 1,024мс
 	TCCR2 = 0;
 	TCCR2 |= (1<<CS21)|(1<<CS20);	//32
-	///  TIMSK|=(1<<TOIE2);            // Enable Counter Overflow Interrupt
+	TIMSK|=(1<<TOIE2);            // Enable Counter Overflow Interrupt
 }
 
 
 
-void Acceleration_to_LED (signed char acceleration_output)
-{
-	//if (Current_resolution == accelerometr_resolution_FS_0)Led_Yellow_OFF;
-	//else Led_Yellow_ON; // Full scale
-Led_RED_OFF; // Первоначально - положительное
-	if (acceleration_output<0)	 //Сразу преобразуем, если отрицательное.
-	{
-		 // индикация отрицательного
-		// positiv=0;
-		acceleration_output^= 0xFF; // инвертируем
-		acceleration_output+=0x01; // прибавляем единицу
-	}
-	signed int thrue_G_output = acceleration_output;
-	thrue_G_output*=accelerometr_resolution_FS_0;
-	
-	
-	
-	// Код для вывода при настройке AlarmThreshold
-	if (Mode_of_operation==ModeThresholdSET)thrue_G_output=RAM_AlarmThreshold*accelerometr_resolution_FS_0;
-	
-	uint8_t i;// локальная переменаная											
-	for(i=0; i<4; i++)									// цикл по длинне строки
-	{
-		LED_string[i] = (char) ((thrue_G_output % 10UL));		//Остаток от деления на десять ,
-		//приводим к char и грузим начиная с конца строки
-		thrue_G_output/=10;
-	}
-}
 
 
-// 
-// void ReadAxis(void)
-// {
-// 	signed char acceleration_output;
-// 	SPI_accelerometr_Read_char(Chosen_axis,&acceleration_output);
-// 	Acceleration_to_LED(acceleration_output);
-// }
-
-uint8_t LIS331_SetUP (void)
-{
-	
-	// Врубаем акселерометр....................................
-	SPI_accelerometr_Write(0x20, 0xC7); // включить генерацию всех трёх измерений и отключить POWER DOWN. Шкала до 2.3 G
-	
-	SPI_IN_buf[0]=0x8F;
-	LIS_read__who_i_am_3(SPI_IN_buf);   // Работает только двоекратно. Найти почему не хватает ума!!!
-	SPI_IN_buf[0]=0x8F;
-	LIS_read__who_i_am_3(SPI_IN_buf);
-	uint8_t var_lis;
-	var_lis=SPI_IN_buf[1];
-	if (var_lis==0x3B)return 1;
-	else return 0;
-	
-	/*
-	uint8_t var_lis;
-	var_lis=SPI_IN_buf[1];
-	if (var_lis==0x3B)uart_puts_P("SPI accelerometer LIS on the bus");
-	else{uart_puts_P("No answer from accelerometer :-(   Wrong byte is - ");
-		uart_puthex_byte(var_lis);
-	}
-	uart_putc(0x0A);								//line feed
-	uart_putc(0x0D);
-	*/
-}
-
-void LIS331_int2_SET (void)  // Изменил настроку. Теперь на меге подтяг. А акселерометр - Open Drain. Надо проверить.
-{
-	SPI_accelerometr_Write(0x22, 0xD0); // прерывание -активный LOW. Open DRAIN Для INT2 выбор активности -FF_WU_2
-	SPI_accelerometr_Write(0x34, 0x20); // FF_WU_2 : прерывание только по Z по верхнему уровню
-	SPI_accelerometr_Write(0x36, current_Max_acceleration); // FF_WU_2: FF_WU_THS_2.
-	SPI_accelerometr_Write(0x37, 0); // duration. 0 ms при 400 Hz ODR
-}
-
-
-
-void Threshold_incrementer (void)
-{
-		if (current_Max_acceleration<124) // Проверить на выход из диапазона (127+перестраховка от дефекта датчика)
-		{
-			current_Max_acceleration+=4; // получается 28 шагов.
-			SPI_accelerometr_Write(0x36, current_Max_acceleration);			// Увеличиваем порог прерывания FF_WU_2
-		}
-		else		//Диапазон выбран, косяк с настройкой,
-					// Либо линия упала на массу. Так или иначе - 
-					//  спасаемся.
-		{
-			
-			Change_Mode_of_Operation(ModeOFF); // вырубаемся с индикацией ошибки
-			Led_RED_ON; // индикация
-			RelayCut_OUT;		// Дополнительно, мало ли.
-		}
-		
-	//Логика для автоотключения
-	if (current_Max_acceleration>Maximum_acceleration)Maximum_acceleration=current_Max_acceleration; //Обновляем максимальное значение
-	
-}
-
-void Threshold_reducer (void)
-{
-		if (current_Max_acceleration<10)return;	// опасаемся прехода через нуль.
-		current_Max_acceleration-=4; // получается 28 шагов тоже
-		SPI_accelerometr_Write(0x36, current_Max_acceleration);			//  порог FF_WU_2
-		
-		//Логика для автоотключения
-		if (current_Max_acceleration<Minimum_acceleration)Minimum_acceleration=current_Max_acceleration; //Обновляем минимальное значение
-	
-}
-
-
-void Time_set_enabler (void)
-{
- if (Mode_of_operation==ModeOFF)
- {
-	 Mode_of_operation = ModeTimeEdit;
-	 Beeper_Activator(BeepPattern_DoubleShort);
- }
- else if (Mode_of_operation==ModeTimeEdit) Change_Mode_of_Operation(ModeOFF);
-  
- else Beeper_Activator(BeepPattern_DoubleShort_Wrong);
- 
-}
-
-
-void MorningTimeSet_enabler (void)
-{
-	if (Mode_of_operation==ModeOFF)
-	{
-		Mode_of_operation = ModeMorningTimeEdit;
-		Beeper_Activator(BeepPattern_DoubleShort_Wrong);
-	}
-	else if (Mode_of_operation==ModeMorningTimeEdit)
-	{ 
-		TimeSuspendSkipEvening|=0x01;	// Ставим метку-принуждение
-		Change_Mode_of_Operation(ModeTimeSuspend);   // Переходим принудительно и раньше времени 23:00
-	}
-	
-	else Beeper_Activator(BeepPattern_DoubleShort_Wrong);
-	
-}
-
-void AlarmThreshold_changer (uint8_t side)
-{
-	
-	
-	if(Mode_of_operation == ModeThresholdSET) // Вызов при любом одиночном нажатии. Или так, или алгоритм менять.
-	{
-
-		if(side)
-		{
-			if(RAM_AlarmThreshold<123)RAM_AlarmThreshold+=4;		//получается 28 шагов // Увеличение порога	
-		}
-		else
-		{
-			if(RAM_AlarmThreshold>4) RAM_AlarmThreshold-=4;			//получается 28 шагов // Уменьшение	
-		}
-	eeprom_update_byte(&EE_AlarmThreshold,RAM_AlarmThreshold);  // Обновляем
-	}
-	if(Mode_of_operation == ModeTimeEdit) // Вызов при любом одиночном нажатии. Или так, или алгоритм менять.
-	{
-	
-	uint8_t var,hour,minute;
-
-	ds1307_getdate(&var, &var, &var, &hour, &minute, &var);
-
-		if(side) //на этой кнопке часы
-		{
-			hour++;
-			if(hour>23)hour =0;
-		}
-		else // На этой минуты
-		{
-			minute++;
-			if(minute>59) minute=0;			//получается 28 шагов // Уменьшение
-		}
-		//ds1307_setdate(var, var, var, hour, minute, 0);  // Обновляем
-
-		 ds1307_SPECIAL_setdate(hour,minute);
-
-	}
-
-
-	if(Mode_of_operation == ModeMorningTimeEdit) 
-	{
-	
-		if(side) //на этой кнопке часы
-		{
-			MorningTime++;
-			if(MorningTime>11)MorningTime=11;
-		}
-		else 
-		{
-			MorningTime--;
-			if(MorningTime<7)MorningTime=7;
-		}
-		eeprom_update_byte(&EE_MorningTime,MorningTime);
-
-	}
-	
-}
 
 
 void Get_time (void)
@@ -545,37 +317,6 @@ void Show_Morning_time (void)
 }
 
 
-void SwitchOnRoutine(void)
-{
-	Mode_of_operation = ModeON;
- 				Beeper_Activator(BeepPattern_SwitchOn);
- 				RelayCut_IN;
-				Led_RED_OFF;Led_Yellow_ON;		//во время работы горит жёлтый.
-				WashTimeWindow = 0;				// Начинаем новый квант стирки (иначе будет непостоянный баг).
-				NumberOfAttempts = 0;				// Обнуляем число попыток, если работаем без резета, а мы к этом и стремимся
-				// Врубаем датчик!
-				LIS331_int2_SET();
-				LIS331_SetUP();
-}
-
-void SwitchOFFRoutine(void)
-{
-	Mode_of_operation = ModeOFF;
-			Beeper_Activator(BeepPattern_SwitchOFF);
-			RelayCut_OUT;
-			SPI_accelerometr_Write(0x20, 0x07); // включить POWER DOWN. Должно LIS вырубить	
-}
-
-void finite_state_machine(void)
-{
-	// Сбросим здесь светодиоды, чтобы не вводили в заблуждение
-	Led_Yellow_OFF;
-	Led_RED_OFF;
-	if(Mode_of_operation == ModeOFF)SwitchOnRoutine();			// Переключаемся на "Включено"
-	else SwitchOFFRoutine();														//Вырубаемся
-	eeprom_update_byte(&EE_Mode_of_operation,Mode_of_operation);
-}
-
 
 
 void Change_Mode_of_Operation(uint8_t NewMode)
@@ -583,55 +324,15 @@ void Change_Mode_of_Operation(uint8_t NewMode)
 	// Сбросим здесь светодиоды, чтобы не вводили в заблуждение
 	Led_Yellow_OFF;
 	Led_RED_OFF;
-	if (NewMode == ModeOFF)SwitchOFFRoutine();
-	else if (NewMode == ModeON) SwitchOnRoutine();			// При загрузке при чтении ЕЕПРОМ - восстановление после выключения света.
 	
-	//Если выход из режима настройки (ветвление для настройки для ходу)
-	else if (Mode_of_operation==ModeThresholdSET)
-	{
-		if (PORTC&(1<<1))									//Если выход на реле активен 
-		{Mode_of_operation=ModeON;
-		Led_RED_OFF;Led_Yellow_ON		//во время работы горит жёлтый.  
-		// Не трогая реле переходим в режим. Подразумевается, что настройкой пользуемся обычно на ходу прибора. Иначе не забываем выключить.
-		}
-		else Change_Mode_of_Operation(ModeOFF);          // МОЖНО ВЫЗВАТЬ ФУНКЦИЮ ИЗ ФУНКЦИИ? РЕКУРСИЯ РАЗРЕШЕНА В СТУДИИ???? ВПЕЧАТЛЁН.
-		
-		
-	}
-	// Ну тогда просто меняем режим работы и всё. Без доп действий. 
-	
-	else Mode_of_operation = NewMode;
+
+
+
 	
 //Сохраняем в энергонезависимой памяти.		 
 eeprom_update_byte(&EE_Mode_of_operation,Mode_of_operation);		 
 }
 
-void ShowAlarm(void)
-{
-if (Mode_of_operation==ModeThresholdSET)					// Либо сам наклацал либо кнопка западает при работе. Не должно такого быть - сработка в режиме настройки.
-	{
-	 RelayCut_OUT;
-	 Led_Yellow_ON;
-	 Mode_of_operation=ModeHWerror;					
-	}
-	// Временно вырубаем машину без изменения режима работы.
-	RelayCut_OUT // Выключить реле
-	Beeper_Activator(BeepPattern_DoubleShort);
-	if(!Overacceleration_Occured)NumberOfAttempts ++;				// Боремся с возможным ложным повторением.
-
-Overacceleration_Occured = 5; // 
-
-	
-	WashTimeWindow = 0; // Не позволяем тут же сделать декремент, если таймер вдруг на этом месте.
-	if (NumberOfAttempts>Allowed_number_of_attempts)			// Приплыли, выключаемся и показываем почему.
-	{
-		Change_Mode_of_Operation(ModeOFF);// вырубаемся
-		Led_Yellow_ON;		//Вдруг юзер спит, чтобы когда проснулся, знал, что если два горят - порог превышения был и выключение.
-		Led_RED_ON;
-		return;
-	}
-	
-}
 
 void Check_Children_Time(void)
 {
@@ -682,104 +383,6 @@ void DIG_num(int16_t num) {
 }
 
 
-void ONE_WIRE_DO_IT_HERE(void)
-
-{
-
-//	one_w_i = 0; // инициализируем индекс
-cli(); /// запретим прерывания, чтобы одновайр работал нормально
-	if (onewire_skip()) { // Если у нас на шине кто-то присутствует,...
-		onewire_send(0x44); // ...запускается замер температуры на всех термодатчиках
-sei(); // Чтобы не висло
- uint8_t i;
- 	for(i=0;i<3;i++)
- 	{
- 		_delay_ms(300); // Минимум на 750 мс.
- 		wdt_reset();		// Внутри блокирующей функции обеспечиваем работу
- 	}
-	//	_delay_ms(900); // Минимум на 750 мс.
-
- /// запретим прерывания, чтобы одновайр работал нормально
-	cli(); // снова блокируем	
-		onewire_enum_init(); // Начало перечисления устройств
-		for(;;) {
-			uint8_t * p = onewire_enum_next(); // Очередной адрес
-			if (!p)
-			break;
-			// Вывод шестнадцатиричной записи адреса в UART и рассчёт CRC
-			uint8_t d = *(p++);
-			uint8_t crc = 0;
-			uint8_t family_code = d; // Сохранение первого байта (код семейства)
-			for (uint8_t i = 0; i < 8; i++) {
-				
-				crc = onewire_crc_update(crc, d);
-				d = *(p++);
-			}
-			if (crc) {
-				// в итоге должен получиться ноль. Если не так, вывод сообщения об ошибке
-						LED_string[3]=10;
-						LED_string[2]=10;
-						LED_string[1]=10;
-						LED_string[0]=11;		// E
-				} else {
-				if ((family_code == 0x28) || (family_code == 0x22) || (family_code == 0x10)) {
-					// Если код семейства соответствует одному из известных...
-					// 0x10 - DS18S20, 0x28 - DS18B20, 0x22 - DS1822
-					// проведём запрос scratchpad'а, считая по ходу crc
-					onewire_send(0xBE);
-					uint8_t scratchpad[8];
-					crc = 0;
-					for (uint8_t i = 0; i < 8; i++) {
-						uint8_t b = onewire_read();
-						scratchpad[i] = b;
-						crc = onewire_crc_update(crc, b);
-					}
-					if (onewire_read() != crc) {
-						// Если контрольная сумма скретчпада не совпала.
- 						LED_string[3]=10;
- 						LED_string[2]=12;		// С
-						LED_string[1]=13;		// Г
-						LED_string[0]=12;		// С
-						} else {
-						int16_t t = (scratchpad[1] << 8) | scratchpad[0];
-						if (family_code == 0x10) { // 0x10 - DS18S20
-							// у DS18S20 значение температуры хранит 1 разряд в дробной части.
-							// повысить точность показаний можно считав байт 6 (COUNT_REMAIN) из scratchpad
-							t <<= 3;
-							if (scratchpad[7] == 0x10) { // проверка на всякий случай
-								t &= 0xFFF0;
-								t += 12 - scratchpad[6];
-							}
-						} // для DS18B20 DS1822 значение по умолчанию 4 бита в дробной части
-						// Вывод температуры
-						DIG_num(t);
-					}
-					} else {
-
-					// Неизвестное устройство
- 				LED_string[3]=10;
-				LED_string[2]=10;
-				LED_string[1]=10;
-				LED_string[0]=12;		// E
-				}
-			}
-			
-		}
-		//One_wire_buf[5]='.';
-		
-		} 
-		else // На шине молчок
-		{
-		//  One_wire_buf[6]='-'; 		LED_string[3]=10;
-		LED_string[2]=10;
-		LED_string[1]=11;
- 		LED_string[0]=10;		// E
-		
-		}
-
-	sei(); /// разрешим прерывания, чтобы всё работало нормально.
-	
-}
 
 
 
@@ -815,100 +418,16 @@ ds1307_init();
 f=NULL;
 
 Buzzer_OFF;// зуммер выключился, загрузка окончена
-unsigned int Time_watcher = 0;
-unsigned int ProgWatchDog = 0;
+
 
 
 	while(1)
 	{
 		wdt_reset(); // сбрасываем собачий таймер
 
-		if ((Mode_of_operation == ModeON)||(Mode_of_operation == ModeTimeSuspend))
-		{
-			Time_watcher++;
-			if(Time_watcher == 0) Check_Children_Time();
-		}
-		
-		if (PORTC&(1<<1))									//Если выход на реле активен (подразумеваю ModeOn но и гарантирую выключение при косяках в логике).
-		{
-			ProgWatchDog++;
-			if(ProgWatchDog > 0xFF00)
-			{		 
-			RelayCut_OUT;
-			Led_Yellow_ON;
-			Mode_of_operation=ModeHWerror;					// Програмный вачдог на дефект датчика(нет прерываний)
-			}
-		}
-		
-	// Обрабатываем LIS-прерывание. В том числе и при настройке порога "на горячую". Из-за логики самодиагностики датчика.
-		if ((!(PIND& (1<<3)))&&((Mode_of_operation==ModeON)||(Mode_of_operation==ModeThresholdSET))	)				
-		{
-			ProgWatchDog = 0;							// От дефекта датчика (отсутствие прерываний).
-
-			Threshold_incrementer();
-			SPI_accelerometr_Read(0x35, NULL);		// сбрасываем прерывание FF_WU_2, читая регистр его статуса 0x00 - адресс куда писать мусор. Может быть опасно
-			G_Flag_acceleration=0x01;				// Сбрасываем битовый счётчик "время без прерываний"
-			Led_RED_ON;								 //Индикация
-			if(current_Max_acceleration > 65)Buzzer_ON; // Чтобы не крякало при кружении возле нулевой вибрации.
-			_delay_ms(2);							// Иначе лис не успевает одуплиться
-			Led_RED_OFF; //
-			Buzzer_OFF;
-													// Проверить на предельную вибрацию											
-			if(current_Max_acceleration>RAM_AlarmThreshold)ShowAlarm();
-			
-			// Неправильная настрока, закоротка линии, выход датчика из строя на замыкание линии - 
-			// Threshold_incrementer() переполнит переменную (которая уменьшается только таймером) 
-			// мы получаем вечный ShowAlarm(), точнее выход по allowedNumberOfAttempts через пятнадцать секунд. Это не очень хорошо. 
-			
-			// Хотя предполагалось вырубание систему с красным светодиодом.
-			
-			// Отсутствие этого прерывания тоже указыает на отказ датчика и тоже приводит в отключению.
-			// Гарантия этого прерывания (от зависания программы) - WATCH DOG.
-
-		}
-
-
-	 if(f)
-		 {
-			cli();
-			f();	// вызов функции если там есть чё.
-			f=NULL;   // Предотвращаем цикличность.
-			sei();
-		 }
 		 
 
 	
-//Обработчик нажатия кнопок/////	
-		  switch(ButtonCheck())
-		 {
-			 case ButtonPressed_0_MASK:
-				 AlarmThreshold_changer(0);
-				 Beeper_Activator(BeepPattern);
-			 break;
-			 case ButtonPressed_1_MASK:
-				 AlarmThreshold_changer(1);
-				 Beeper_Activator(BeepPattern);
-			 break;
-			 case ButtonPressed_0_LONG_MASK:
-				Beeper_Activator(BeepPattern_Meloidic);
-				Change_Mode_of_Operation(ModeThresholdSET);
-			 break;
-			 case ButtonPressed_1_LONG_MASK:
-				finite_state_machine();
-			 break;
-			 case (ButtonPressed_0_LONG_MASK| ButtonPressed_1_LONG_MASK):
-				 Time_set_enabler();
-			 break;
-			  case ButtonPressed_SHORT_Double_MASK:
-			   
-			  MorningTimeSet_enabler();
-			  break;
-
-			  
-				//Beeper_Activator(BeepPattern_DoubleShort);    /// Было вот так, эти три строки. Это была, наверное, просто заготовка
-				// if (Mode_of_operation==ModeON)RelayCut_IN // Включить реле
-				// else Beeper_Activator(BeepPattern_DoubleShort_Wrong);		
-		 }
 		 	
 	
 	}
