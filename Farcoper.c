@@ -1,5 +1,5 @@
 
-#define F_CPU 80000000UL  // 8 MHz, внутренняя RC-цепочка
+//#define F_CPU 80000000UL  // 8 MHz, внутренняя RC-цепочка
 #include <avr/io.h>
 
 #include <avr/interrupt.h>
@@ -396,7 +396,6 @@ Buzzer_OFF;// зуммер выключился, загрузка окончен
 			  case ButtonPressed_SHORT_Double_MASK:
 		
 			  break;
-
 		
 		  }
 
@@ -407,10 +406,5 @@ Buzzer_OFF;// зуммер выключился, загрузка окончен
             f=NULL;   // Предотвращаем цикличность.
             sei();
         }
-		 
-
-	
-		 	
-	
 	}
  }

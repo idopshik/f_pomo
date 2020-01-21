@@ -18,7 +18,7 @@
 #endif
 
 /* I2C clock in Hz */
-#define SCL_CLOCK  10000L
+#define SCL_CLOCK  100000L
 
 
 /*************************************************************************
@@ -30,7 +30,7 @@ void i2c_init(void)
   
   TWSR = 0;                         /* no prescaler */
   TWBR = ((F_CPU/SCL_CLOCK)-16)/2;  /* must be > 10 for stable operation */
-
+  /* TWBR = 400;   // Вот даром этот хардкод не нужен, но варнинг раздражает. */
 }/* i2c_init */
 
 
